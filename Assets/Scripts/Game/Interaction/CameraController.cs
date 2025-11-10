@@ -36,7 +36,11 @@ namespace DLS.Game
 
 		static bool InChipView => UIDrawer.ActiveMenu != UIDrawer.MenuType.ChipCustomization;
 
-		public static void Reset()
+        static bool isTouchGestureActive;
+        static float pinchPrevDistance;
+        static Vector2 pinchPrevMidpoint;
+
+        public static void Reset()
 		{
 			chipViewStateLookup = new Dictionary<string, ViewState>();
 			customizeView = new ViewState();
@@ -50,32 +54,39 @@ namespace DLS.Game
 			camera.backgroundColor = DrawSettings.ActiveTheme.BackgroundCol;
 		}
 
-		public static void Update()
-		{
-			ViewState newActiveViewState = GetActiveViewState();
-			if (activeView != newActiveViewState)
-			{
-				activeView = newActiveViewState;
-			}
-			else
-			{
-				if (KeyboardShortcuts.ResetCameraShortcutTriggered)
-				{
-					chipViewStateLookup.Remove(Project.ActiveProject.ViewedChip.ChipName);
-				}
+        public static void Update()
+        {
+            ViewState newActiveViewState = GetActiveViewState();
+            if (activeView != newActiveViewState)
+            {
+                activeView = newActiveViewState;
+            }
+            else
+            {
+                if (KeyboardShortcuts.ResetCameraShortcutTriggered)
+                {
+                    chipViewStateLookup.Remove(Project.ActiveProject.ViewedChip.ChipName);
+                }
 
-				Vector2 mouseScreenPos = InputHelper.MousePos;
-				Vector2 mouseWorldPos = camera.ScreenToWorldPoint(mouseScreenPos);
+                if (Input.touchCount > 0)
+                {
+                    HandleTouchInput();
+                }
+                else
+                {
+                    Vector2 mouseScreenPos = InputHelper.MousePos;
+                    Vector2 mouseWorldPos = camera.ScreenToWorldPoint(mouseScreenPos);
 
-				HandlePanInput(mouseScreenPos, mouseWorldPos);
-				HandleZoomInput(mouseScreenPos);
-			}
+                    HandlePanInput(mouseScreenPos, mouseWorldPos);
+                    HandleZoomInput(mouseScreenPos);
+                }
+            }
 
-			UpdateCameraState();
-		}
+            UpdateCameraState();
+        }
 
-		// Pan with middle-mouse drag or alt+left-mouse drag
-		static void HandlePanInput(Vector2 mouseScreenPos, Vector2 mouseWorldPos)
+        // Pan with middle-mouse drag or alt+left-mouse drag
+        static void HandlePanInput(Vector2 mouseScreenPos, Vector2 mouseWorldPos)
 		{
 			if (CanMove)
 			{
@@ -157,8 +168,64 @@ namespace DLS.Game
 			}
 		}
 
-		// shift scroll reserved for adjusting spacing when placing multiple elements
-		static bool CanMiddleMouseZoom() => !(InputHelper.ShiftIsHeld && Project.ActiveProject.controller.IsPlacingElements) && InputHelper.IsMouseInGameWindow();
+        static void HandleTouchInput()
+        {
+            if (Input.touchCount < 2 || !CanStartNewInput || !CanMove || !CanZoom)
+            {
+                if (Input.touchCount == 0)
+                {
+                    isTouchGestureActive = false;
+                }
+                return;
+            }
+            Touch t0 = Input.GetTouch(0);
+            Touch t1 = Input.GetTouch(1);
+            Vector2 p0 = t0.position;
+            Vector2 p1 = t1.position;
+            Vector2 midpoint = (p0 + p1) * 0.5f;
+            float distance = Vector2.Distance(p0, p1);
+            bool beganNow = t0.phase == TouchPhase.Began || t1.phase == TouchPhase.Began;
+            if (!isTouchGestureActive || beganNow)
+            {
+                isTouchGestureActive = true;
+                pinchPrevDistance = distance;
+                pinchPrevMidpoint = midpoint;
+                ContextMenu.CloseContextMenu();
+                return;
+            }
+            bool touchesActive =
+                (t0.phase == TouchPhase.Moved || t0.phase == TouchPhase.Stationary) &&
+                (t1.phase == TouchPhase.Moved || t1.phase == TouchPhase.Stationary);
+            if (isTouchGestureActive && touchesActive)
+            {
+                float zoomPrev = activeView.OrthoSize;
+                float pinchDelta = pinchPrevDistance - distance;
+                float targetZoom = zoomPrev + pinchDelta / Screen.width * zoomSpeed * zoomPrev;
+                SetZoom(targetZoom);
+                if (zoomToMouse && !Mathf.Approximately(zoomPrev, activeView.OrthoSize))
+                {
+                    Vector2 worldBefore = camera.ScreenToWorldPoint(pinchPrevMidpoint);
+                    Vector2 worldAfter = camera.ScreenToWorldPoint(midpoint);
+                    MovePosition(worldBefore - worldAfter);
+                }
+                else
+                {
+                    Vector2 worldPrevMid = camera.ScreenToWorldPoint(pinchPrevMidpoint);
+                    Vector2 worldNowMid = camera.ScreenToWorldPoint(midpoint);
+                    MovePosition(worldPrevMid - worldNowMid);
+                }
+                pinchPrevDistance = distance;
+                pinchPrevMidpoint = midpoint;
+            }
+            if (t0.phase == TouchPhase.Ended || t0.phase == TouchPhase.Canceled ||
+                t1.phase == TouchPhase.Ended || t1.phase == TouchPhase.Canceled)
+            {
+                isTouchGestureActive = false;
+            }
+        }
+
+        // shift scroll reserved for adjusting spacing when placing multiple elements
+        static bool CanMiddleMouseZoom() => !(InputHelper.ShiftIsHeld && Project.ActiveProject.controller.IsPlacingElements) && InputHelper.IsMouseInGameWindow();
 
 		static void MovePosition(Vector2 delta)
 		{

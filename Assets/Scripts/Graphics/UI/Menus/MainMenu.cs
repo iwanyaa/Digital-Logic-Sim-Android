@@ -18,16 +18,9 @@ namespace DLS.Graphics
 
 		static MenuScreen activeMenuScreen = MenuScreen.Main;
 		static PopupKind activePopup = PopupKind.None;
-		static AppSettings EditedAppSettings;
 
 		static readonly UIHandle ID_ProjectNameInput = new("MainMenu_ProjectNameInputField");
-		static readonly UIHandle ID_DisplayResolutionWheel = new("MainMenu_DisplayResolutionWheel");
-		static readonly UIHandle ID_FullscreenWheel = new("MainMenu_FullscreenWheel");
 		static readonly UIHandle ID_ProjectsScrollView = new("MainMenu_ProjectsScrollView");
-
-		static readonly string[] SettingsWheelFullScreenOptions = { "OFF", "MAXIMIZED", "BORDERLESS", "EXCLUSIVE" };
-		static readonly FullScreenMode[] FullScreenModes = { FullScreenMode.Windowed, FullScreenMode.MaximizedWindow, FullScreenMode.FullScreenWindow, FullScreenMode.ExclusiveFullScreen };
-		static readonly string[] SettingsWheelVSyncOptions = { "DISABLED", "ENABLED" };
 
 		static readonly Func<string, bool> projectNameValidator = ProjectNameValidator;
 		static readonly UI.ScrollViewDrawContentFunc loadProjectScrollViewDrawer = DrawAllProjectsInScrollView;
@@ -37,7 +30,6 @@ namespace DLS.Graphics
 		{
 			FormatButtonString("New Project"),
 			FormatButtonString("Open Project"),
-			FormatButtonString("Settings"),
 			FormatButtonString("About"),
 			FormatButtonString("Quit")
 		};
@@ -51,19 +43,6 @@ namespace DLS.Graphics
 			FormatButtonString("Open")
 		};
 
-		static readonly Vector2Int[] Resolutions =
-		{
-			new(960, 540),
-			new(1280, 720),
-			new(1920, 1080),
-			new(2560, 1440)
-		};
-
-		static readonly string[] ResolutionNames = Resolutions.Select(r => ResolutionToString(r)).ToArray();
-		static readonly string[] FullScreenResName = Resolutions.Select(r => ResolutionToString(Main.FullScreenResolution)).ToArray();
-		static readonly string[] settingsButtonGroupNames = { "EXIT", "APPLY" };
-		static readonly bool[] settingsButtonGroupStates = new bool[settingsButtonGroupNames.Length];
-
 		static readonly bool[] openProjectButtonStates = new bool[openProjectButtonNames.Length];
 
 		static ProjectDescription[] allProjectDescriptions;
@@ -72,8 +51,8 @@ namespace DLS.Graphics
 
 		static int selectedProjectIndex;
 
-		static readonly string authorString = "Created by: Sebastian Lague";
-		static readonly string versionString = $"Version: {Main.DLSVersion} ({Main.LastUpdatedString})";
+		static readonly string authorString = "Created by: Sebastian Lague - Android Compatability by: iwanya";
+		static readonly string versionString = $"Version: {Main.DLSVersion}-{Main.DLSAndroidVersion} ({Main.LastUpdatedString})";
 		static string SelectedProjectName => allProjectDescriptions[selectedProjectIndex].ProjectName;
 
 		static string FormatButtonString(string s) => capitalize ? s.ToUpper() : s;
@@ -105,9 +84,6 @@ namespace DLS.Graphics
 					break;
 				case MenuScreen.LoadProject:
 					DrawLoadProjectScreen();
-					break;
-				case MenuScreen.Settings:
-					DrawSettingsScreen();
 					break;
 				case MenuScreen.About:
 					DrawAboutScreen();
@@ -158,17 +134,11 @@ namespace DLS.Graphics
 				selectedProjectIndex = -1;
 				activeMenuScreen = MenuScreen.LoadProject;
 			}
-			else if (buttonIndex == 2 || KeyboardShortcuts.MainMenu_SettingsShortcutTriggered) // Settings
-			{
-				EditedAppSettings = Main.ActiveAppSettings;
-				activeMenuScreen = MenuScreen.Settings;
-				OnSettingsMenuOpened();
-			}
-			else if (buttonIndex == 3) // About
+			else if (buttonIndex == 2) // About
 			{
 				activeMenuScreen = MenuScreen.About;
 			}
-			else if (buttonIndex == 4 || KeyboardShortcuts.MainMenu_QuitShortcutTriggered) // Quit
+			else if (buttonIndex == 3 || KeyboardShortcuts.MainMenu_QuitShortcutTriggered) // Quit
 			{
 				Quit();
 			}
@@ -272,87 +242,6 @@ namespace DLS.Graphics
 			activePopup = PopupKind.None;
 		}
 
-
-		static void OnSettingsMenuOpened()
-		{
-			// Automatically select whichever resolution option is closest to current window size
-			WheelSelectorState resolutionWheelState = UI.GetWheelSelectorState(ID_DisplayResolutionWheel);
-			int closestMatchError = int.MaxValue;
-			for (int i = 0; i < Resolutions.Length; i++)
-			{
-				int matchError = Mathf.Min(Mathf.Abs(Screen.width - Resolutions[i].x), Mathf.Abs(Screen.height - Resolutions[i].y));
-				if (matchError < closestMatchError)
-				{
-					closestMatchError = matchError;
-					resolutionWheelState.index = i;
-				}
-			}
-
-			// Automatically set curr fullscreen mode
-			WheelSelectorState fullscreenWheelState = UI.GetWheelSelectorState(ID_FullscreenWheel);
-			for (int i = 0; i < FullScreenModes.Length; i++)
-			{
-				if (Screen.fullScreenMode == FullScreenModes[i])
-				{
-					fullscreenWheelState.index = i;
-					break;
-				}
-			}
-		}
-
-		static void DrawSettingsScreen()
-		{
-			DrawSettings.UIThemeDLS theme = DrawSettings.ActiveUITheme;
-
-			float regionWidth = 30;
-			float labelOriginLeft = UI.Centre.x - regionWidth / 2;
-			float elementOriginRight = UI.Centre.x + regionWidth / 2;
-			Vector2 wheelSize = new(16, 2.5f);
-			Vector2 pos = new(labelOriginLeft, UI.Centre.y + 4);
-			using (UI.BeginBoundsScope(true))
-			{
-				Draw.ID backgroundPanelID = UI.ReservePanel();
-
-				// -- Resolution --
-				bool resEnabled = EditedAppSettings.fullscreenMode == FullScreenMode.Windowed;
-				UI.DrawText("Resolution", theme.FontRegular, theme.FontSizeRegular, pos, Anchor.CentreLeft, Color.white);
-				string[] resNames = resEnabled ? ResolutionNames : FullScreenResName;
-				int resIndex = UI.WheelSelector(ID_DisplayResolutionWheel, resNames, new Vector2(elementOriginRight, pos.y), wheelSize, theme.OptionsWheel, Anchor.CentreRight, enabled: resEnabled);
-				EditedAppSettings.ResolutionX = Resolutions[resIndex].x;
-				EditedAppSettings.ResolutionY = Resolutions[resIndex].y;
-
-				// -- Full screen --
-				pos += Vector2.down * 4;
-				UI.DrawText("Fullscreen", theme.FontRegular, theme.FontSizeRegular, pos, Anchor.CentreLeft, Color.white);
-				int fullScreenSettingIndex = UI.WheelSelector(ID_FullscreenWheel, SettingsWheelFullScreenOptions, new Vector2(elementOriginRight, pos.y), wheelSize, theme.OptionsWheel, Anchor.CentreRight);
-				EditedAppSettings.fullscreenMode = FullScreenModes[fullScreenSettingIndex];
-				pos += Vector2.down * 4;
-
-				// -- Vsync --
-				UI.DrawText("VSync", theme.FontRegular, theme.FontSizeRegular, pos, Anchor.CentreLeft, Color.white);
-				int vsyncSetting = UI.WheelSelector(EditedAppSettings.VSyncEnabled ? 1 : 0, SettingsWheelVSyncOptions, new Vector2(elementOriginRight, pos.y), wheelSize, theme.OptionsWheel, Anchor.CentreRight);
-				EditedAppSettings.VSyncEnabled = vsyncSetting == 1;
-
-				// Background panel
-				UI.ModifyPanel(backgroundPanelID, UI.GetCurrentBoundsScope().Centre, UI.GetCurrentBoundsScope().Size + Vector2.one * 3, ColHelper.MakeCol255(37, 37, 43));
-			}
-
-			Vector2 buttonPos = UI.PrevBounds.BottomLeft + Vector2.down * DrawSettings.VerticalButtonSpacing;
-			settingsButtonGroupStates[0] = true;
-			settingsButtonGroupStates[1] = true;
-
-			int buttonIndex = UI.HorizontalButtonGroup(settingsButtonGroupNames, settingsButtonGroupStates, theme.MainMenuButtonTheme, buttonPos, UI.PrevBounds.Width, UILayoutHelper.DefaultSpacing, 0, Anchor.TopLeft);
-
-			if (buttonIndex == 0)
-			{
-				BackToMain();
-			}
-			else if (buttonIndex == 1)
-			{
-				Main.SaveAndApplyAppSettings(EditedAppSettings);
-			}
-		}
-
 		static void DrawNamePopup()
 		{
 			DrawSettings.UIThemeDLS theme = DrawSettings.ActiveUITheme;
@@ -371,7 +260,7 @@ namespace DLS.Graphics
 				Vector2 inputFieldSize = new Vector2(charSize.x * MaxProjectNameLength, charSize.y) + padding * 2;
 
 
-				InputFieldState state = UI.InputField(ID_ProjectNameInput, inputTheme, UI.Centre, inputFieldSize, "", Anchor.Centre, padding.x, projectNameValidator, true);
+				InputFieldState state = UI.InputField(ID_ProjectNameInput, inputTheme, UI.Centre, inputFieldSize, "", Anchor.Centre, padding.x, projectNameValidator, false);
 
 				string projectName = state.text;
 				bool validProjectName = !string.IsNullOrWhiteSpace(projectName) && SaveUtils.ValidFileName(projectName);
@@ -482,8 +371,6 @@ namespace DLS.Graphics
 			UI.DrawText(versionString, theme.FontRegular, theme.FontSizeRegular, datePos, Anchor.TextCentreRight, col);
 		}
 
-		static string ResolutionToString(Vector2Int r) => $"{r.x} x {r.y}";
-
 		static void Quit()
 		{
 			Application.Quit();
@@ -493,7 +380,6 @@ namespace DLS.Graphics
 		{
 			Main,
 			LoadProject,
-			Settings,
 			About
 		}
 

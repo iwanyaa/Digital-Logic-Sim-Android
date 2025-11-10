@@ -24,7 +24,11 @@ namespace DLS.Graphics
 		static bool wasMouseOverMenu;
 		static string contextMenuHeader;
 
-		static readonly MenuEntry[] pinColEntries = ((PinColour[])Enum.GetValues(typeof(PinColour))).Select(col =>
+        static bool openMenuRequested;
+        static IInteractable openMenuRequestedElement;
+        static Vector2 openMenuRequestedScreenPos;
+
+        static readonly MenuEntry[] pinColEntries = ((PinColour[])Enum.GetValues(typeof(PinColour))).Select(col =>
 			new MenuEntry(Format(Enum.GetName(typeof(PinColour), col)), () => SetCol(col), CanSetCol)
 		).ToArray();
 
@@ -136,8 +140,14 @@ namespace DLS.Graphics
 			{
 				HandleOpenMenuInput();
 
-				// Draw
-				if (IsOpen) DrawContextMenu(activeContextMenuEntries);
+                if (openMenuRequested)
+                {
+                    openMenuRequested = false;
+                    TryOpenContextMenuForElement(openMenuRequestedElement, openMenuRequestedScreenPos);
+                }
+
+                // Draw
+                if (IsOpen) DrawContextMenu(activeContextMenuEntries);
 
 				// Close menu input
 				if (InputHelper.IsMouseDownThisFrame(MouseButton.Left) || KeyboardShortcuts.CancelShortcutTriggered)
@@ -147,83 +157,102 @@ namespace DLS.Graphics
 			}
 		}
 
-		static void HandleOpenMenuInput()
-		{
-			// Open menu input
-			if (InputHelper.IsMouseDownThisFrame(MouseButton.Right) && !KeyboardShortcuts.CameraActionKeyHeld && !InteractionState.MouseIsOverUI)
-			{
-				bool inCustomizeMenu = UIDrawer.ActiveMenu == UIDrawer.MenuType.ChipCustomization;
-				IInteractable hoverElement = InteractionState.ElementUnderMouse;
+        static void HandleOpenMenuInput()
+        {
+            if (InputHelper.IsMouseDownThisFrame(MouseButton.Right) && !InteractionState.MouseIsOverUI)
+            {
+                TryOpenContextMenuForHover();
+            }
+        }
 
-				bool openSubChipContextMenu = hoverElement is SubChipInstance && !inCustomizeMenu;
-				bool openDevPinContextMenu = (hoverElement is PinInstance pin && pin.parent is DevPinInstance) || hoverElement is DevPinInstance;
-				bool openWireContextMenu = hoverElement is WireInstance;
-				bool openSubchipOutputPinContextMenu = hoverElement is PinInstance pin2 && pin2.parent is SubChipInstance && pin2.IsSourcePin && !pin2.IsBusPin;
+        public static bool TryOpenContextMenuForHover()
+        {
+            return TryOpenContextMenuForElement(InteractionState.ElementUnderMouse, InputHelper.MousePos);
+        }
 
-				if (openSubChipContextMenu || openDevPinContextMenu || openWireContextMenu || openSubchipOutputPinContextMenu)
-				{
-					interactionContextName = string.Empty;
-					interactionContext = hoverElement;
-					string headerName = string.Empty;
+        public static bool TryOpenContextMenuForElement(IInteractable hoverElement, Vector2 screenPos)
+        {
+            if (hoverElement == null) return false;
+            if (KeyboardShortcuts.CameraActionKeyHeld || InteractionState.MouseIsOverUI)
+                return false;
 
-					if (openSubChipContextMenu)
-					{
-						SubChipInstance subChip = (SubChipInstance)hoverElement;
-						interactionContextName = subChip.Description.Name;
+            bool inCustomizeMenu = UIDrawer.ActiveMenu == UIDrawer.MenuType.ChipCustomization;
 
-						if (subChip.ChipType == ChipType.Custom)
-						{
-							headerName = subChip.Description.Name;
-							activeContextMenuEntries = entries_customSubchip;
-						}
-						else // builtin type
-						{
-							headerName = ChipTypeHelper.IsBusType(subChip.ChipType) ? "BUS" : subChip.Description.Name;
-							if (subChip.ChipType is ChipType.Key) activeContextMenuEntries = entries_builtinKeySubchip;
-							else if (ChipTypeHelper.IsRomType(subChip.ChipType)) activeContextMenuEntries = entries_builtinRomSubchip;
-							else if (subChip.ChipType is ChipType.Pulse) activeContextMenuEntries = entries_builtinPulseChip;
-							else if (ChipTypeHelper.IsBusType(subChip.ChipType)) activeContextMenuEntries = entries_builtinBus;
-							else if (subChip.ChipType == ChipType.DisplayLED) activeContextMenuEntries = entries_builtinLED;
-							else activeContextMenuEntries = entries_builtinSubchip;
-						}
+            bool openSubChipContextMenu = hoverElement is SubChipInstance && !inCustomizeMenu;
+            bool openDevPinContextMenu =
+                (hoverElement is PinInstance pin && pin.parent is DevPinInstance) ||
+                hoverElement is DevPinInstance;
+            bool openWireContextMenu = hoverElement is WireInstance;
+            bool openSubchipOutputPinContextMenu =
+                hoverElement is PinInstance pin2 && pin2.parent is SubChipInstance && pin2.IsSourcePin && !pin2.IsBusPin;
 
-						Project.ActiveProject.controller.Select(interactionContext as IMoveable, false);
-					}
-					else if (openDevPinContextMenu)
-					{
-						if (interactionContext is DevPinInstance devPinInstance) interactionContext = devPinInstance.Pin;
+            if (openSubChipContextMenu || openDevPinContextMenu || openWireContextMenu || openSubchipOutputPinContextMenu)
+            {
+                interactionContextName = string.Empty;
+                interactionContext = hoverElement;
+                string headerName = string.Empty;
 
-						PinInstance activePin = (PinInstance)interactionContext;
-						headerName = CreatePinHeaderName(activePin.Name);
-						interactionContextName = activePin.Name;
-						Project.ActiveProject.controller.Select(activePin.parent, false);
-						activeContextMenuEntries = activePin.IsSourcePin ? entries_inputDevPin : entries_outputDevPin;
-					}
-					else if (openWireContextMenu)
-					{
-						WireInstance wire = (WireInstance)interactionContext;
-						if (wire.IsBusWire) headerName = "BUS LINE";
-						else headerName = CreateWireHeaderString(wire);
+                if (openSubChipContextMenu)
+                {
+                    SubChipInstance subChip = (SubChipInstance)hoverElement;
+                    interactionContextName = subChip.Description.Name;
 
-						activeContextMenuEntries = entries_wire;
-					}
-					else if (openSubchipOutputPinContextMenu)
-					{
-						PinInstance pinContext = (PinInstance)interactionContext;
-						headerName = CreatePinHeaderName(pinContext.Name);
-						activeContextMenuEntries = entries_subChipOutput;
-					}
+                    if (subChip.ChipType == ChipType.Custom)
+                    {
+                        headerName = subChip.Description.Name;
+                        activeContextMenuEntries = entries_customSubchip;
+                    }
+                    else
+                    {
+                        headerName = ChipTypeHelper.IsBusType(subChip.ChipType) ? "BUS" : subChip.Description.Name;
+                        if (subChip.ChipType is ChipType.Key) activeContextMenuEntries = entries_builtinKeySubchip;
+                        else if (ChipTypeHelper.IsRomType(subChip.ChipType)) activeContextMenuEntries = entries_builtinRomSubchip;
+                        else if (subChip.ChipType is ChipType.Pulse) activeContextMenuEntries = entries_builtinPulseChip;
+                        else if (ChipTypeHelper.IsBusType(subChip.ChipType)) activeContextMenuEntries = entries_builtinBus;
+                        else if (subChip.ChipType == ChipType.DisplayLED) activeContextMenuEntries = entries_builtinLED;
+                        else activeContextMenuEntries = entries_builtinSubchip;
+                    }
 
-					SetContextMenuOpen(headerName);
-				}
-				else
-				{
-					CloseContextMenu();
-				}
-			}
-		}
+                    Project.ActiveProject.controller.Select(interactionContext as IMoveable, false);
+                }
+                else if (openDevPinContextMenu)
+                {
+                    if (interactionContext is DevPinInstance devPinInstance) interactionContext = devPinInstance.Pin;
 
-		static string CreateWireHeaderString(WireInstance wire)
+                    PinInstance activePin = (PinInstance)interactionContext;
+                    headerName = CreatePinHeaderName(activePin.Name);
+                    interactionContextName = activePin.Name;
+                    Project.ActiveProject.controller.Select(activePin.parent, false);
+                    activeContextMenuEntries = activePin.IsSourcePin ? entries_inputDevPin : entries_outputDevPin;
+                }
+                else if (openWireContextMenu)
+                {
+                    WireInstance wire = (WireInstance)interactionContext;
+                    headerName = wire.IsBusWire ? "BUS LINE" : CreateWireHeaderString(wire);
+                    activeContextMenuEntries = entries_wire;
+                }
+                else if (openSubchipOutputPinContextMenu)
+                {
+                    PinInstance pinContext = (PinInstance)interactionContext;
+                    headerName = CreatePinHeaderName(pinContext.Name);
+                    activeContextMenuEntries = entries_subChipOutput;
+                }
+                SetContextMenuOpen(headerName, screenPos);
+                return true;
+            }
+
+            CloseContextMenu();
+            return false;
+        }
+
+        public static void RequestOpenContextMenuForElement(IInteractable element, Vector2 screenPos)
+        {
+            openMenuRequested = true;
+            openMenuRequestedElement = element;
+            openMenuRequestedScreenPos = screenPos;
+        }
+
+        static string CreateWireHeaderString(WireInstance wire)
 		{
 			string pinName = wire.SourcePin.Name;
 			if (string.IsNullOrWhiteSpace(pinName)) return "WIRE";
@@ -255,15 +284,19 @@ namespace DLS.Graphics
 			}
 		}
 
-		static void SetContextMenuOpen(string header)
-		{
-			mouseOpenMenuPos = UI.ScreenToUISpace(InputHelper.MousePos);
-			contextMenuHeader = header.PadRight(pad);
-			IsOpen = true;
-		}
+        static void SetContextMenuOpen(string header, Vector2 screenPos)
+        {
+            mouseOpenMenuPos = UI.ScreenToUISpace(screenPos);
+            contextMenuHeader = header.PadRight(pad);
+            IsOpen = true;
+        }
 
+        static void SetContextMenuOpen(string header)
+        {
+            SetContextMenuOpen(header, InputHelper.MousePos);
+        }
 
-		static void DrawContextMenu(MenuEntry[] menuEntries)
+        static void DrawContextMenu(MenuEntry[] menuEntries)
 		{
 			Draw.StartLayer(Vector2.zero, 1, true);
 

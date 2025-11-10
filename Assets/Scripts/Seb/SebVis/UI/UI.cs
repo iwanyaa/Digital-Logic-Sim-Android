@@ -68,10 +68,12 @@ namespace Seb.Vis.UI
 
 		public static bool IsMouseOverUIThisFrame => mouseOverUIFrameIndex == Time.frameCount;
 
-		//  --------------------------- UI Scope functions ---------------------------
+        static readonly System.Collections.Generic.Dictionary<UIHandle, TouchScreenKeyboard> _kbByField = new System.Collections.Generic.Dictionary<UIHandle, TouchScreenKeyboard>();
 
-		// Begin drawing full-screen UI
-		public static UIScope CreateUIScope() => CreateUIScope(Vector2.zero, new Vector2(Screen.width, Screen.height), false);
+        //  --------------------------- UI Scope functions ---------------------------
+
+        // Begin drawing full-screen UI
+        public static UIScope CreateUIScope() => CreateUIScope(Vector2.zero, new Vector2(Screen.width, Screen.height), false);
 
 		// Begin drawing UI with fixed aspect ratio. If aspect doesn't match screen aspect, letterboxes can optionally be displayed.
 		public static UIScope CreateFixedAspectUIScope(int aspectX = 16, int aspectY = 9, bool drawLetterbox = true)
@@ -372,9 +374,23 @@ namespace Seb.Vis.UI
 					// Set caret pos based on mouse position
 					if (mouseInBounds) state.SetCursorIndex(CharIndexBeforeMouse(textCentreLeft_ss.x), InputHelper.ShiftIsHeld);
 				}
+                if (mouseInBounds && state.focused)
+                {
+                    if (!_kbByField.TryGetValue(id, out var kb) || kb == null || !kb.active)
+                    {
+                        _kbByField[id] = TouchScreenKeyboard.Open(
+                            state.text,
+                            TouchScreenKeyboardType.Default,
+                            autocorrection: true,
+                            multiline: false,
+                            secure: false,
+                            alert: false
+                        );
+                    }
+                }
 
-				// Hold-drag left mouse to select
-				if (state.focused && InputHelper.IsMouseHeld(MouseButton.Left) && state.isMouseDownInBounds)
+                // Hold-drag left mouse to select
+                if (state.focused && InputHelper.IsMouseHeld(MouseButton.Left) && state.isMouseDownInBounds)
 				{
 					state.SetCursorIndex(CharIndexBeforeMouse(textCentreLeft_ss.x), true);
 				}
@@ -384,80 +400,38 @@ namespace Seb.Vis.UI
 					state.SetFocus(true);
 				}
 
-				// Draw focus outline and update text
-				if (state.focused)
-				{
-					const float outlineWidth = 0.05f;
-					Draw.QuadOutline(ss.centre, ss.size, outlineWidth * scale, theme.focusBorderCol);
-					foreach (char c in InputHelper.InputStringThisFrame)
-					{
-						bool invalidChar = char.IsControl(c) || char.IsSurrogate(c) || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format || char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.PrivateUse;
-						if (invalidChar) continue;
-						state.TryInsertText(c + "", validation);
-					}
+                // Draw focus outline and update text
+                if (state.focused)
+                {
+                    const float outlineWidth = 0.05f;
+                    Draw.QuadOutline(ss.centre, ss.size, outlineWidth * scale, theme.focusBorderCol);
+                    _kbByField.TryGetValue(id, out var kb);
+                    if (kb == null || !kb.active)
+                    {
+                        state.SetFocus(false);
+                    }
+                    else
+                    {
+                        string kbText = kb.text ?? string.Empty;
+                        if (!string.Equals(kbText, state.text, StringComparison.Ordinal))
+                        {
+                            state.ClearText();
+                            if (kbText.Length > 0)
+                                state.TryInsertText(kbText, validation);
+                            state.SetCursorIndex(state.text.Length, select: false);
+                        }
+                        if (kb.status == TouchScreenKeyboard.Status.Canceled ||
+                            kb.status == TouchScreenKeyboard.Status.Done ||
+                            kb.status == TouchScreenKeyboard.Status.LostFocus)
+                        {
+                            _kbByField[id] = null;
+                            state.SetFocus(false);
+                        }
+                    }
+                }
 
-					// Paste from clipboard
-					if (InputHelper.CtrlIsHeld && InputHelper.IsKeyDownThisFrame(KeyCode.V))
-					{
-						state.TryInsertText(InputHelper.GetClipboardContents(), validation);
-					}
-
-					if (state.text.Length > 0)
-					{
-						// Backspace / delete
-						if (CanTrigger(ref state.backspaceTrigger, KeyCode.Backspace))
-						{
-							int charDeleteCount = InputHelper.CtrlIsHeld ? state.text.Length : 1; // delete all if ctrl is held
-							for (int i = 0; i < charDeleteCount; i++)
-							{
-								state.Delete(true, validation);
-							}
-						}
-						else if (CanTrigger(ref state.deleteTrigger, KeyCode.Delete))
-						{
-							state.Delete(false, validation);
-						}
-
-						// Arrow keys
-						bool select = InputHelper.ShiftIsHeld;
-						bool leftArrow = CanTrigger(ref state.arrowKeyTrigger, KeyCode.LeftArrow);
-						bool rightArrow = CanTrigger(ref state.arrowKeyTrigger, KeyCode.RightArrow);
-						bool jumpToPrevWordStart = InputHelper.CtrlIsHeld && leftArrow;
-						bool jumpToNextWordEnd = InputHelper.CtrlIsHeld && rightArrow;
-						bool jumpToStart = InputHelper.IsKeyDownThisFrame(KeyCode.UpArrow) || InputHelper.IsKeyDownThisFrame(KeyCode.PageUp) || InputHelper.IsKeyDownThisFrame(KeyCode.Home) || (jumpToPrevWordStart && InputHelper.AltIsHeld);
-						bool jumpToEnd = InputHelper.IsKeyDownThisFrame(KeyCode.DownArrow) || InputHelper.IsKeyDownThisFrame(KeyCode.PageDown) || InputHelper.IsKeyDownThisFrame(KeyCode.End) || (jumpToNextWordEnd && InputHelper.AltIsHeld);
-
-						if (jumpToStart) state.SetCursorIndex(0, select);
-						else if (jumpToEnd) state.SetCursorIndex(state.text.Length, select);
-						else if (jumpToNextWordEnd) state.SetCursorIndex(state.NextWordEndIndex(), select);
-						else if (jumpToPrevWordStart) state.SetCursorIndex(state.PrevWordIndex(), select);
-						else if (leftArrow) state.DecrementCursor(select);
-						else if (rightArrow) state.IncrementCursor(select);
-
-						bool copyTriggered = InputHelper.CtrlIsHeld && InputHelper.IsKeyDownThisFrame(KeyCode.C);
-						bool cutTriggered = InputHelper.CtrlIsHeld && InputHelper.IsKeyDownThisFrame(KeyCode.X);
-
-						// Copy selected text (or all text if nothing selected)
-						if (copyTriggered || cutTriggered)
-						{
-							string copyText = state.text;
-							if (state.isSelecting) copyText = state.text.AsSpan(state.SelectionMinIndex, state.SelectionMaxIndex - state.SelectionMinIndex).ToString();
-							InputHelper.CopyToClipboard(copyText);
-
-							if (cutTriggered)
-							{
-								if (state.isSelecting) state.Delete(true, validation);
-								else state.ClearText();
-							}
-						}
-
-						// Select all
-						if (InputHelper.CtrlIsHeld && InputHelper.IsKeyDownThisFrame(KeyCode.A)) state.SelectAll();
-					}
-				}
-
-				// Draw text
-				using (CreateMaskScope(centre, size))
+                // Draw text
+                using (CreateMaskScope(centre, size))
 				{
 					float fontSize_ss = theme.fontSize * scale;
 					bool showDefaultText = string.IsNullOrEmpty(state.text) || !Application.isPlaying;
@@ -503,19 +477,6 @@ namespace Seb.Vis.UI
 
 			OnFinishedDrawingUIElement(centre, size);
 			return state;
-
-			static bool CanTrigger(ref InputFieldState.TriggerState triggerState, KeyCode key)
-			{
-				if (InputHelper.IsKeyDownThisFrame(key)) triggerState.lastManualTime = Time.time;
-
-				if (InputHelper.IsKeyDownThisFrame(key) || (InputHelper.IsKeyHeld(key) && CanAutoTrigger(triggerState)))
-				{
-					triggerState.lastAutoTiggerTime = Time.time;
-					return true;
-				}
-
-				return false;
-			}
 
 			static bool CanAutoTrigger(InputFieldState.TriggerState triggerState)
 			{

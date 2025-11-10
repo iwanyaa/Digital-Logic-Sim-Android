@@ -71,3 +71,22 @@ crashlytics-build.properties
 /[Aa]ssets/[Ss]treamingAssets/aa/*
 /.idea
 /.vsconfig
+
+# Android / Gradle
+.gradle/
+**/android_gradle_build.json
+**/additional_project_files.txt
+
+# IL2CPP / Bee / temporary build folders
+.utmp/
+FramePacing/
+**/prefab_config.json
+**/games-frame-pacingConfig*.cmake
+**/symbol_folder_index.txt
+**/hash_key.txt
+
+# Prefab / NDK intermediate
+prefab/
+**/armeabi-v7a/
+**/.ninja_deps
+**/.ninja_log

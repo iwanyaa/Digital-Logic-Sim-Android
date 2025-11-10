@@ -41,8 +41,8 @@ namespace DLS.Game
 
 		public bool HasControl => !UIDrawer.InInputBlockingMenu() && project.CanEditViewedChip;
 
-		// Cannot interact with elements when other elements are being moved, in a menu, or drawing a selection box
-		bool CanInteract => !IsMovingSelection && !UIDrawer.InInputBlockingMenu() && !IsCreatingSelectionBox && !InteractionState.MouseIsOverUI;
+        // Cannot interact with elements when other elements are being moved, in a menu, or drawing a selection box
+        bool CanInteract => !IsMovingSelection && !UIDrawer.InInputBlockingMenu() && !IsCreatingSelectionBox && !InteractionState.MouseIsOverUI;
 		public bool IsCreatingWire => WireToPlace != null;
 		public bool IsPlacingElements => isPlacingNewElements;
 		public bool IsPlacingElementOrCreatingWire => isPlacingNewElements || IsCreatingWire;
@@ -51,20 +51,37 @@ namespace DLS.Game
 		public bool CanInteractWithPinStateDisplay => CanInteract && !IsCreatingWire && Project.ActiveProject.CanEditViewedChip;
 		public bool CanInteractWithPinHandle => CanInteractWithPinStateDisplay;
 
+        bool touchInProgress;
+        int touchFingerId;
+        float touchStartTime;
+        Vector2 touchStartScreenPos;
+        bool touchLongPressFired;
+        bool touchSentLeftDown;
+        const float LongPressDuration = 0.5f;
+        const float LongPressMaxMovement = 20f;
+        const float DragStartMovement = 10f;
 
-		public ChipInteractionController(Project project)
+        public ChipInteractionController(Project project)
 		{
 			this.project = project;
 		}
 
-		public void Update()
-		{
-			HandleKeyboardInput();
-			HandleMouseInput();
-		}
+        public void Update()
+        {
+            HandleKeyboardInput();
 
-		// Don't allow interaction with wire that's currently being placed (this would allow it to try to connect to itself for example...)
-		public bool CanInteractWithWire(WireInstance wire) => CanInteract && wire != WireToPlace;
+            if (Input.touchCount > 0)
+            {
+                HandleTouchInput();
+            }
+            else
+            {
+                HandleMouseInput();
+            }
+        }
+
+        // Don't allow interaction with wire that's currently being placed (this would allow it to try to connect to itself for example...)
+        public bool CanInteractWithWire(WireInstance wire) => CanInteract && wire != WireToPlace;
 
 		public bool CanCompleteWireConnection(WireInstance wireToConnectTo, out PinInstance endPin)
 		{
@@ -252,7 +269,82 @@ namespace DLS.Game
 			}
 		}
 
-		List<IMoveable> GetNonIncludedLinkedBusElements(List<IMoveable> elements)
+        void HandleTouchInput()
+        {
+            if (Input.touchCount == 0)
+                return;
+            Touch touch = Input.GetTouch(0);
+            Vector2 pos = touch.position;
+            switch (touch.phase)
+            {
+                case TouchPhase.Began:
+                    touchInProgress = true;
+                    touchFingerId = touch.fingerId;
+                    touchStartTime = Time.unscaledTime;
+                    touchStartScreenPos = pos;
+                    touchLongPressFired = false;
+                    touchSentLeftDown = false;
+                    break;
+                case TouchPhase.Moved:
+                case TouchPhase.Stationary:
+                    if (!touchInProgress || touch.fingerId != touchFingerId)
+                        break;
+                    float elapsed = Time.unscaledTime - touchStartTime;
+                    float moveDist = Vector2.Distance(pos, touchStartScreenPos);
+                    if (!touchLongPressFired &&
+                        elapsed >= LongPressDuration &&
+                        moveDist <= LongPressMaxMovement)
+                    {
+                        touchLongPressFired = true;
+                        touchSentLeftDown = false;
+                        if (IsPlacingOrMovingElementOrCreatingWire)
+                        {
+                            CancelEverything();
+                        }
+                        else
+                        {
+                            IInteractable target = InteractionState.ElementUnderMouse;
+                            if (target == null && SelectedElements.Count > 0)
+                            {
+                                target = SelectedElements[0] as IInteractable;
+                            }
+                            if (target != null)
+                            {
+                                DLS.Graphics.ContextMenu.RequestOpenContextMenuForElement(target, pos);
+                            }
+                        }
+                    }
+                    else if (!touchLongPressFired && moveDist > DragStartMovement)
+                    {
+                        if (!touchSentLeftDown)
+                        {
+                            touchSentLeftDown = true;
+                            HandleLeftMouseDown();
+                        }
+                    }
+                    break;
+                case TouchPhase.Ended:
+                case TouchPhase.Canceled:
+                    if (!touchInProgress || touch.fingerId != touchFingerId)
+                        break;
+                    if (!touchLongPressFired)
+                    {
+                        if (!touchSentLeftDown)
+                        {
+                            HandleLeftMouseDown();
+                        }
+                        HandleLeftMouseUp();
+                    }
+                    touchInProgress = false;
+                    break;
+            }
+            if (HasControl && !touchLongPressFired)
+            {
+                UpdatePositionsToMouse();
+            }
+        }
+
+        List<IMoveable> GetNonIncludedLinkedBusElements(List<IMoveable> elements)
 		{
 			List<IMoveable> nonIncludedBusPairs = new();
 			HashSet<int> elementIDs = elements.Select(e => e.ID).ToHashSet();
